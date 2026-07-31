@@ -1,33 +1,25 @@
 # Knowledge Maps
 
-Knowledge Maps turns an arXiv paper into an evidence-backed prerequisite graph.
-It answers one question: **which earlier arXiv papers should someone read to
-understand this paper?**
+Knowledge Maps accepts an arXiv ID or URL and returns a directed prerequisite
+graph as JSON.
 
-The backend accepts an arXiv ID or URL and returns graph-ready JSON. It does not
-summarize PDFs, generate tutorials, or provide a frontend.
+## Pipeline
 
-## How it works
+1. Fetch the target paper's metadata and abstract from arXiv.
+2. Retrieve direct references and citation evidence from Semantic Scholar.
+3. Classify each candidate as `essential`, `helpful`, `related_only`, or
+   `not_relevant`.
+4. Expand one additional citation hop through `essential` and `helpful` direct
+   candidates.
+5. Return selected papers, prerequisite relationships, model evidence, citation
+   paths, and generation metadata.
 
-```text
-arXiv paper
-    -> metadata and abstract from arXiv
-    -> direct references and citation evidence from Semantic Scholar
-    -> one model judgment per candidate
-    -> one extra citation hop through selected direct prerequisites
-    -> validated papers, prerequisite edges, evidence, and provenance
-```
+Each relationship points from a prerequisite paper to the requested paper.
 
-The model labels every candidate as `essential`, `helpful`, `related_only`, or
-`not_relevant`. Only `essential` and `helpful` candidates become graph edges.
-Citation paths explain why a candidate was inspected; citation alone never makes
-a paper a prerequisite.
+## Example
 
-## Complete example
-
-The current pipeline produced this complete map for
-[*Fast Transformer Decoding: One Write-Head is All You Need*](https://arxiv.org/abs/1911.02150),
-the paper that introduced multi-query attention:
+Output for
+[*Fast Transformer Decoding: One Write-Head is All You Need*](https://arxiv.org/abs/1911.02150):
 
 ```mermaid
 flowchart LR
@@ -73,8 +65,9 @@ flowchart LR
     class billion,wiki,average,goodman,rnn,encdec,conv,summarization,supervised,nonauto helpful
 ```
 
-The run returned 13 paper nodes, 12 relationships, and no failed candidates.
-This excerpt shows the public response shape:
+This run returned 13 paper nodes, 12 relationships, and no failed candidates.
+
+## Response
 
 ```json
 {
@@ -125,20 +118,12 @@ This excerpt shows the public response shape:
 }
 ```
 
-`Attention Is All You Need` is the clearest prerequisite: the target modifies
-its multi-head attention mechanism. The older attention paper provides conceptual
-lineage, while the average-attention paper provides nearby decoding-efficiency
-context.
+The response includes complete paper metadata. The example above contains only
+the fields needed to show the graph contract and one relationship's provenance.
 
-The example also exposes the baseline's main quality problem: the small model is
-too permissive with `helpful`. Benchmark and historical papers can enter the map
-even when they are not genuine prerequisites. This is why the next milestone is a
-small human-reviewed evaluation set, not more infrastructure or a larger graph.
+## Installation
 
-## Run it
-
-Requires Python 3.11+ and a Hugging Face token. A Semantic Scholar API key is
-optional but avoids its shared unauthenticated rate limit.
+Requires Python 3.11+.
 
 ```powershell
 python -m venv .venv
@@ -146,13 +131,15 @@ python -m venv .venv
 Copy-Item .env.example .env
 ```
 
-Set `HF_TOKEN` in `.env`, then generate JSON directly:
+Set `HF_TOKEN` in `.env`. `S2_API_KEY` is optional.
+
+## CLI
 
 ```powershell
 .\.venv\Scripts\knowledge-maps.exe build 1911.02150
 ```
 
-Or run the API:
+## API
 
 ```powershell
 .\.venv\Scripts\uvicorn.exe knowledge_maps.api:create_app --factory
@@ -165,11 +152,6 @@ Content-Type: application/json
 {"arxiv_id_or_url": "1911.02150"}
 ```
 
-Every successful candidate judgment is saved immediately in
-`.knowledge_maps/checkpoints.sqlite3`. Identical runs reuse those judgments.
-Transient infrastructure failures receive bounded retries, and Hugging Face's
-observed rolling limit receives one retry after a 60-second cooldown. Any remaining
-candidate failures are returned explicitly under `generation.failed_candidates`.
-
-An uncached citation-heavy paper can take several minutes. The pipeline currently
-does not impose a candidate-count cap or truncate abstracts and citation evidence.
+Successful model judgments are stored in
+`.knowledge_maps/checkpoints.sqlite3` and reused when the model, prompt, paper
+data, and citation evidence are unchanged.
