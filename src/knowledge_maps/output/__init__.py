@@ -1,0 +1,1 @@
+"""Knowledge-map output construction."""
