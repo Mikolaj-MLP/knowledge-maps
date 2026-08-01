@@ -1,0 +1,56 @@
+name: Build full data.json
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - .dataset-trigger
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build full data.json
+        run: |
+          python - <<'PY'
+          import json
+          import pathlib
+          import zipfile
+
+          archive = pathlib.Path('data/knowledge_maps_gold_v0_5_audited/knowledge_maps_gold_v0_5_audited.zip')
+          extract_dir = pathlib.Path('.tmp_dataset')
+
+          with zipfile.ZipFile(archive) as zf:
+              zf.extractall(extract_dir)
+
+          matches = list(extract_dir.rglob('graphs_audited.jsonl'))
+          if len(matches) != 1:
+              raise RuntimeError(f'Expected one graphs_audited.jsonl, found {len(matches)}')
+
+          graphs = [json.loads(line) for line in matches[0].read_text(encoding='utf-8').splitlines() if line.strip()]
+          if len(graphs) != 30:
+              raise RuntimeError(f'Expected 30 graphs, found {len(graphs)}')
+
+          pathlib.Path('data.json').write_text(
+              json.dumps(graphs, ensure_ascii=False, indent=2) + '\n',
+              encoding='utf-8',
+          )
+          PY
+
+          rm -rf .tmp_dataset
+          rm -rf data/knowledge_maps_gold_v0_5_audited
+          rm -f .dataset-trigger
+          rm -f .github/workflows/one-time-data.yml
+
+      - name: Commit result
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git commit -m "Replace old dataset with full data.json"
+          git push
