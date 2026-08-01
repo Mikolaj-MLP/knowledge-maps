@@ -1,0 +1,61 @@
+name: Build full data.json
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - .github/workflows/build-full-data-json.yml
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Convert audited graphs to data.json and remove old files
+        run: |
+          python - <<'PY'
+          import json
+          import pathlib
+          import zipfile
+
+          archive = pathlib.Path('data/knowledge_maps_gold_v0_5_audited/knowledge_maps_gold_v0_5_audited.zip')
+          extract_dir = pathlib.Path('.tmp_knowledge_maps_dataset')
+
+          with zipfile.ZipFile(archive) as zf:
+              zf.extractall(extract_dir)
+
+          matches = list(extract_dir.rglob('graphs_audited.jsonl'))
+          if len(matches) != 1:
+              raise RuntimeError(f'Expected exactly one graphs_audited.jsonl, found {len(matches)}')
+
+          graphs = []
+          with matches[0].open(encoding='utf-8') as source:
+              for line_number, line in enumerate(source, 1):
+                  line = line.strip()
+                  if line:
+                      graphs.append(json.loads(line))
+
+          if len(graphs) != 30:
+              raise RuntimeError(f'Expected 30 graphs, found {len(graphs)}')
+
+          pathlib.Path('data.json').write_text(
+              json.dumps(graphs, ensure_ascii=False, indent=2) + '\n',
+              encoding='utf-8',
+          )
+          PY
+
+          rm -rf .tmp_knowledge_maps_dataset
+          rm -rf data/knowledge_maps_gold_v0_5_audited
+          rm -f .github/workflows/build-full-data-json.yml
+
+      - name: Commit generated dataset
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git commit -m "Replace old dataset with full data.json"
+          git push
