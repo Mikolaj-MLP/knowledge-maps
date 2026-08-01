@@ -24,7 +24,7 @@ class Settings:
         return cls(
             semantic_scholar_api_key=_optional_environment_value("S2_API_KEY"),
             model_api_key=_required_environment_value("HF_TOKEN"),
-            model_base_url=HUGGING_FACE_BASE_URL,
+            model_base_url=(_optional_environment_value("MODEL_BASE_URL") or HUGGING_FACE_BASE_URL),
             model_name=os.getenv("MODEL_NAME", DEFAULT_MODEL_NAME).strip(),
         )
 

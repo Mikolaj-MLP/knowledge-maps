@@ -3,7 +3,9 @@ from datetime import UTC, datetime
 
 from knowledge_maps import cli
 from knowledge_maps.schemas import (
+    ExpansionLevelMetrics,
     GenerationMetadata,
+    GenerationMetrics,
     KnowledgeMap,
     Paper,
 )
@@ -25,6 +27,23 @@ def test_build_command_prints_graph_json(monkeypatch, capsys) -> None:
         generation=GenerationMetadata(
             model="test-model",
             generated_at=datetime(2026, 7, 30, 12, tzinfo=UTC),
+            metrics=GenerationMetrics(
+                duration_seconds=0,
+                papers_expanded=1,
+                unique_candidates_considered=0,
+                inference_requests=0,
+                checkpoint_hits=0,
+                levels=[
+                    ExpansionLevelMetrics(
+                        depth=0,
+                        papers_expanded=1,
+                        candidates_classified=0,
+                        essential_edges=0,
+                        helpful_edges=0,
+                        failed_classifications=0,
+                    )
+                ],
+            ),
         ),
     )
     monkeypatch.setattr(cli, "create_service", lambda: ServiceStub(graph))

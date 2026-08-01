@@ -38,10 +38,12 @@ def test_model_returns_validated_judgments_for_supplied_candidates(tmp_path: Pat
         assert request_payload["response_format"]["type"] == "json_schema"
         model_input = json.loads(request_payload["messages"][1]["content"])
         candidate_id = model_input["candidate"]["paper"]["arxiv_id"]
+        assert model_input["root_target"]["arxiv_id"] == target.arxiv_id
+        assert model_input["immediate_target"]["arxiv_id"] == target.arxiv_id
         citation = model_input["citation_evidence"][0]
         assert citation["source_arxiv_id"] == candidate_id
         assert model_input["candidate"]["citation_paths"] == [[candidate_id, "2000.00001"]]
-        relation = "essential" if candidate_id == "1900.00001" else "related_only"
+        role = "central_dependency" if candidate_id == "1900.00001" else "experimental_context"
         evidence = (
             "The target directly extends its method."
             if candidate_id == "1900.00001"
@@ -55,8 +57,7 @@ def test_model_returns_validated_judgments_for_supplied_candidates(tmp_path: Pat
                         "message": {
                             "content": json.dumps(
                                 {
-                                    "candidate_id": candidate_id,
-                                    "relation": relation,
+                                    "role": role,
                                     "evidence": evidence,
                                 }
                             )
@@ -75,13 +76,18 @@ def test_model_returns_validated_judgments_for_supplied_candidates(tmp_path: Pat
         JudgmentCheckpointStore(tmp_path / "checkpoints.sqlite3"),
     )
 
-    result = model.classify(target, candidates)
+    result = model.classify(target, target, candidates)
 
     assert [judgment.relation for judgment in result.judgments] == [
         PrerequisiteRelation.ESSENTIAL,
         PrerequisiteRelation.RELATED_ONLY,
     ]
     assert result.failures == []
+    assert [(judgment.candidate_id, judgment.target_id) for judgment in result.judgments] == [
+        (candidate.paper.arxiv_id, target.arxiv_id) for candidate in candidates
+    ]
+    assert result.inference_requests == 2
+    assert result.checkpoint_hits == 0
 
 
 def test_model_retries_transient_failures_and_reuses_the_checkpoint(
@@ -101,7 +107,7 @@ def test_model_retries_transient_failures_and_reuses_the_checkpoint(
         request_count += 1
         if request_count < 3:
             return httpx.Response(503)
-        return _judgment_response(candidate.paper.arxiv_id)
+        return _judgment_response()
 
     monkeypatch.setattr(
         "knowledge_maps.modeling.prerequisite.time.sleep",
@@ -116,13 +122,17 @@ def test_model_retries_transient_failures_and_reuses_the_checkpoint(
         store,
     )
 
-    first_result = model.classify(target, [candidate])
-    second_result = model.classify(target, [candidate])
+    first_result = model.classify(target, target, [candidate])
+    second_result = model.classify(target, target, [candidate])
 
     assert request_count == 3
     assert delays == [1, 2]
     assert first_result.failures == []
+    assert first_result.inference_requests == 3
+    assert first_result.checkpoint_hits == 0
     assert second_result.judgments == first_result.judgments
+    assert second_result.inference_requests == 0
+    assert second_result.checkpoint_hits == 1
 
 
 def test_model_records_a_non_transient_failure_and_continues(
@@ -146,7 +156,7 @@ def test_model_records_a_non_transient_failure_and_continues(
         requested_ids.append(candidate_id)
         if candidate_id == failed_candidate.paper.arxiv_id:
             return httpx.Response(402, json={"error": "Provider billing rejected the request"})
-        return _judgment_response(candidate_id)
+        return _judgment_response()
 
     model = OpenAICompatiblePrerequisiteModel(
         "http://model.test",
@@ -156,7 +166,7 @@ def test_model_records_a_non_transient_failure_and_continues(
         JudgmentCheckpointStore(tmp_path / "checkpoints.sqlite3"),
     )
 
-    result = model.classify(target, [failed_candidate, successful_candidate])
+    result = model.classify(target, target, [failed_candidate, successful_candidate])
 
     assert requested_ids == [failed_candidate.paper.arxiv_id, successful_candidate.paper.arxiv_id]
     assert [judgment.candidate_id for judgment in result.judgments] == [
@@ -169,53 +179,7 @@ def test_model_records_a_non_transient_failure_and_continues(
     )
 
 
-def test_model_waits_for_hugging_face_limit_window_and_retries(
-    tmp_path: Path,
-    monkeypatch,
-) -> None:
-    target = Paper(arxiv_id="2000.00001", title="Target", authors=[])
-    candidate = _candidate(
-        Paper(arxiv_id="1900.00001", title="Foundation", authors=[]),
-        target,
-    )
-    request_count = 0
-    delays = []
-
-    def handler(_: httpx.Request) -> httpx.Response:
-        nonlocal request_count
-        request_count += 1
-        if request_count == 1:
-            return httpx.Response(
-                402,
-                json={
-                    "error": (
-                        "You have depleted your monthly included credits. "
-                        "Purchase pre-paid credits to continue using Inference Providers."
-                    )
-                },
-            )
-        return _judgment_response(candidate.paper.arxiv_id)
-
-    monkeypatch.setattr(
-        "knowledge_maps.modeling.prerequisite.time.sleep",
-        delays.append,
-    )
-    model = OpenAICompatiblePrerequisiteModel(
-        "http://model.test",
-        "qwen",
-        "test-token",
-        httpx.Client(transport=httpx.MockTransport(handler)),
-        JudgmentCheckpointStore(tmp_path / "checkpoints.sqlite3"),
-    )
-
-    result = model.classify(target, [candidate])
-
-    assert request_count == 2
-    assert delays == [60]
-    assert result.failures == []
-
-
-def test_model_records_a_judgment_for_the_wrong_candidate_as_failed(tmp_path: Path) -> None:
+def test_model_records_invalid_structured_output_as_failed(tmp_path: Path) -> None:
     target = Paper(arxiv_id="2000.00001", title="Target", authors=[])
     candidates = [
         _candidate(
@@ -233,9 +197,7 @@ def test_model_records_a_judgment_for_the_wrong_candidate_as_failed(tmp_path: Pa
                         "message": {
                             "content": json.dumps(
                                 {
-                                    "candidate_id": "1900.00002",
-                                    "relation": "helpful",
-                                    "evidence": "It prepares the reader.",
+                                    "role": "supporting_background",
                                 }
                             ),
                         }
@@ -253,12 +215,12 @@ def test_model_records_a_judgment_for_the_wrong_candidate_as_failed(tmp_path: Pa
         JudgmentCheckpointStore(tmp_path / "checkpoints.sqlite3"),
     )
 
-    result = model.classify(target, candidates)
+    result = model.classify(target, target, candidates)
 
     assert result.judgments == []
     assert result.failures[0].candidate_id == "1900.00001"
     assert result.failures[0].attempts == 1
-    assert result.failures[0].error == "Model returned a judgment for the wrong candidate"
+    assert result.failures[0].error == "Model output does not match the judgment schema"
 
 
 def test_model_classifies_each_candidate_once_in_an_independent_request(
@@ -287,8 +249,7 @@ def test_model_classifies_each_candidate_once_in_an_independent_request(
                         "message": {
                             "content": json.dumps(
                                 {
-                                    "candidate_id": candidate_id,
-                                    "relation": "helpful",
+                                    "role": "supporting_background",
                                     "evidence": "It prepares the reader.",
                                 }
                             )
@@ -306,7 +267,7 @@ def test_model_classifies_each_candidate_once_in_an_independent_request(
         JudgmentCheckpointStore(tmp_path / "checkpoints.sqlite3"),
     )
 
-    result = model.classify(target, candidates)
+    result = model.classify(target, target, candidates)
 
     assert [len(candidate_ids) for candidate_ids in request_candidate_ids] == [1] * 12
     assert [judgment.candidate_id for judgment in result.judgments] == [
@@ -322,6 +283,7 @@ def _candidate(
 ) -> PrerequisiteCandidate:
     return PrerequisiteCandidate(
         paper=paper,
+        target_id=target.arxiv_id,
         discovery=CandidateDiscovery(
             depth=1,
             paths=[
@@ -341,7 +303,7 @@ def _candidate(
     )
 
 
-def _judgment_response(candidate_id: str) -> httpx.Response:
+def _judgment_response() -> httpx.Response:
     return httpx.Response(
         200,
         json={
@@ -350,8 +312,7 @@ def _judgment_response(candidate_id: str) -> httpx.Response:
                     "message": {
                         "content": json.dumps(
                             {
-                                "candidate_id": candidate_id,
-                                "relation": "helpful",
+                                "role": "supporting_background",
                                 "evidence": "It prepares the reader.",
                             }
                         )

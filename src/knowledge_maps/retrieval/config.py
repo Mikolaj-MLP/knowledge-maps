@@ -2,9 +2,8 @@
 
 from knowledge_maps.schemas import PrerequisiteRelation
 
-# Only direct papers judged to prepare the reader are useful bridges to the
-# second citation hop. Related and irrelevant papers are not expanded.
+# Helpful papers remain optional leaves. Only essential papers are expanded,
+# which keeps deeper retrieval focused without imposing a candidate-count cap.
 EXPANSION_RELATIONS = {
     PrerequisiteRelation.ESSENTIAL,
-    PrerequisiteRelation.HELPFUL,
 }

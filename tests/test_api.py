@@ -10,7 +10,13 @@ from knowledge_maps.errors import (
     ModelOutputError,
     PaperNotFoundError,
 )
-from knowledge_maps.schemas import GenerationMetadata, KnowledgeMap, Paper
+from knowledge_maps.schemas import (
+    ExpansionLevelMetrics,
+    GenerationMetadata,
+    GenerationMetrics,
+    KnowledgeMap,
+    Paper,
+)
 
 
 class SuccessfulServiceStub:
@@ -68,5 +74,22 @@ def _knowledge_map() -> KnowledgeMap:
         generation=GenerationMetadata(
             model="test-model",
             generated_at=datetime(2026, 7, 31, 12, tzinfo=UTC),
+            metrics=GenerationMetrics(
+                duration_seconds=0,
+                papers_expanded=1,
+                unique_candidates_considered=0,
+                inference_requests=0,
+                checkpoint_hits=0,
+                levels=[
+                    ExpansionLevelMetrics(
+                        depth=0,
+                        papers_expanded=1,
+                        candidates_classified=0,
+                        essential_edges=0,
+                        helpful_edges=0,
+                        failed_classifications=0,
+                    )
+                ],
+            ),
         ),
     )
