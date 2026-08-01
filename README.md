@@ -15,8 +15,8 @@ It accepts an arXiv ID or URL and returns a directed prerequisite graph as JSON.
 5. Classify each deeper candidate against its immediate paper while retaining
    the requested paper and complete citation path as context.
 6. Continue until no branch produces another `essential` prerequisite.
-7. Return selected papers, prerequisite relationships, model evidence, citation
-   paths, and generation metadata.
+7. Return selected papers, prerequisite relationships, model evidence, and
+   citation paths.
 
 Each relationship points from a prerequisite to the paper it prepares the
 reader for. The resulting graph therefore represents both direct prerequisites
@@ -27,9 +27,9 @@ discarded, and `helpful` relationships remain leaves.
 
 ## Example
 
-A complete run for
-[*FlashAttention-2: Faster Attention with Better Parallelism and Work Partitioning*](https://arxiv.org/abs/2307.08691)
-produced this prerequisite graph:
+For a query targeting
+[*FlashAttention-2: Faster Attention with Better Parallelism and Work Partitioning*](https://arxiv.org/abs/2307.08691),
+Knowledge Maps returns this prerequisite graph:
 
 ```mermaid
 flowchart LR
@@ -76,10 +76,8 @@ flowchart LR
     class transformer,vocabulary,sublinear,volta,mqa,reformer,butterfly,keops,movement,memory,gqa helpful
 ```
 
-The run expanded the target and both essential prerequisites. It considered 77
-unique candidates, made 90 inference requests, and completed without failures.
-Neither expanded prerequisite produced another essential edge, so traversal
-terminated after the second level.
+FlashAttention and online softmax are direct prerequisites. The incoming edges
+to those papers show the background that prepares a reader for each step.
 
 ## Response
 
@@ -129,42 +127,12 @@ An abridged response from the example run:
         ]
       }
     }
-  ],
-  "generation": {
-    "model": "Qwen/Qwen3-235B-A22B-Instruct-2507:nscale",
-    "metrics": {
-      "duration_seconds": 1146.193,
-      "papers_expanded": 3,
-      "unique_candidates_considered": 77,
-      "inference_requests": 90,
-      "checkpoint_hits": 0,
-      "levels": [
-        {
-          "depth": 0,
-          "papers_expanded": 1,
-          "candidates_classified": 17,
-          "essential_edges": 2,
-          "helpful_edges": 6,
-          "failed_classifications": 0
-        },
-        {
-          "depth": 1,
-          "papers_expanded": 2,
-          "candidates_classified": 73,
-          "essential_edges": 0,
-          "helpful_edges": 9,
-          "failed_classifications": 0
-        }
-      ]
-    },
-    "complete": true,
-    "failed_candidates": []
-  }
+  ]
 }
 ```
 
-The complete response includes every selected paper, relationship, citation
-context, and generation metric.
+The complete response includes every selected paper, relationship, and citation
+context.
 
 ## Installation
 
@@ -203,7 +171,3 @@ Content-Type: application/json
 
 {"arxiv_id_or_url": "2307.08691"}
 ```
-
-Successful model judgments are stored in
-`.knowledge_maps/checkpoints.sqlite3` and reused when the model, prompt, paper
-data, and citation evidence are unchanged.
